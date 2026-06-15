@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LynkMesh Autopilot Engineer</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0f172a; --panel:#111827; --panel2:#020617; --line:#334155; --text:#e5e7eb; --muted:#94a3b8; --blue:#93c5fd; --green:#86efac; --red:#fca5a5; }
+    body { font-family: Inter, Arial, sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+    header { padding: 24px 32px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    main { padding: 28px 32px; display: grid; grid-template-columns: 1.1fr .9fr; gap: 20px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; box-shadow: 0 18px 55px rgba(0,0,0,.22); }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    h2 { margin-top: 0; color: var(--blue); }
+    h3 { margin-bottom: 8px; }
+    pre { white-space: pre-wrap; word-break: break-word; background: var(--panel2); padding: 16px; border-radius: 12px; border: 1px solid #1f2937; max-height: 560px; overflow:auto; }
+    .status { display: inline-block; padding: 6px 10px; border-radius: 999px; background: #1e293b; }
+    .passed { color: var(--green); }
+    .failed { color: var(--red); }
+    .muted { color: var(--muted); }
+    .timeline { display: grid; gap: 14px; }
+    .attempt { border-left: 3px solid #60a5fa; padding-left: 14px; }
+    .pill { display:inline-block; padding: 3px 8px; border-radius:999px; background:#1e293b; margin-right:6px; font-size:12px; }
+    .metrics { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:12px; margin-top:18px; }
+    .metric { background:#0b1220; border:1px solid #263449; border-radius:12px; padding:14px; }
+    .metric strong { display:block; font-size:22px; color:#fff; margin-top:4px; }
+    details summary { cursor:pointer; color: var(--blue); }
+    .full { grid-column: 1 / -1; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } .metrics { grid-template-columns:1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LynkMesh Autopilot Engineer</h1>
+    <div class="status">Status: {{ data.get('status', 'no run yet') }}</div>
+    <div class="muted">Deterministic codebase context → Qwen patching → tests → self-correction → human approval</div>
+    <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+      <form method="post" action="/autopilot/run?mock=true"><button style="padding:8px 12px; border-radius:10px; border:1px solid #334155; background:#1e293b; color:#e5e7eb; cursor:pointer;">Run mock demo</button></form>
+      <form method="post" action="/autopilot/run?mock=false"><button style="padding:8px 12px; border-radius:10px; border:1px solid #334155; background:#0b3b6f; color:#e5e7eb; cursor:pointer;">Run real Qwen</button></form>
+    </div>
+    {% if data %}
+      <div class="metrics">
+        <div class="metric"><span class="muted">Qwen mode</span><strong>{{ data.get('qwen_mode', 'unknown') }}</strong></div>
+        <div class="metric"><span class="muted">Model</span><strong>{{ data.get('qwen_model', 'unknown') }}</strong></div>
+        <div class="metric"><span class="muted">Attempts</span><strong>{{ metrics.get('attempts') }}</strong></div>
+        <div class="metric"><span class="muted">Self-correction</span><strong>{{ 'yes' if metrics.get('self_correction') else 'no' }}</strong></div>
+      </div>
+    {% endif %}
+  </header>
+  <main>
+    <section class="card">
+      <h2>Autopilot Timeline</h2>
+      {% if data %}
+        <div class="timeline">
+          <div>
+            <span class="pill">Before</span>
+            Test baseline:
+            <strong class="{{ 'passed' if data.get('test_before', {}).get('passed') else 'failed' }}">
+              {{ 'passed' if data.get('test_before', {}).get('passed') else 'failed' }}
+            </strong>
+          </div>
+          {% for attempt in data.get('attempts', []) %}
+            {% set patch = attempt.get('patch_plan', {}) %}
+            {% set test = attempt.get('test_result', {}) %}
+            <div class="attempt">
+              <h3>Attempt {{ attempt.get('attempt') }}</h3>
+              <div><span class="pill">Patch</span>{{ patch.get('summary') }}</div>
+              <div><span class="pill">Self-correction</span>{{ 'yes' if patch.get('self_correction') else 'no' }}</div>
+              <div><span class="pill">Risk</span>{{ patch.get('risk', 'unknown') }}</div>
+              <div><span class="pill">Test</span>
+                <strong class="{{ 'passed' if test.get('passed') else 'failed' }}">
+                  {{ 'passed' if test.get('passed') else 'failed' }}
+                </strong>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p>Run the agent first.</p>
+      {% endif %}
+    </section>
+    <section class="card">
+      <h2>LynkMesh Trace</h2>
+      {% if data.get('context') %}
+        <pre>{{ data.get('context') | tojson(indent=2) }}</pre>
+      {% else %}
+        <pre>No context yet.</pre>
+      {% endif %}
+    </section>
+    <section class="card full">
+      <h2>Human-Reviewable Report</h2>
+      <pre>{{ report }}</pre>
+    </section>
+    <section class="card full">
+      <details>
+        <summary>Developer JSON evidence endpoint preview</summary>
+        <pre>{{ data | tojson(indent=2) }}</pre>
+      </details>
+    </section>
+  </main>
+</body>
+</html>

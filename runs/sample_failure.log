@@ -1,0 +1,10 @@
+FAIL: Call to undefined method TransactionModel::getMontlySummary()
+
+Trace:
+GET /transactions
+TransactionController@index
+TransactionService@getMonthlySummary
+TransactionModel
+
+Observed during test command:
+php tests/run.php

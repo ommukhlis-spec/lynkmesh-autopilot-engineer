@@ -1,0 +1,27 @@
+{
+  "failure": {
+    "type": "undefined_method",
+    "message": "Call to undefined method TransactionModel::getMontlySummary()"
+  },
+  "trace": [
+    "routes.php:GET /transactions",
+    "app/Controllers/TransactionController.php:TransactionController@index",
+    "app/Services/TransactionService.php:TransactionService@getMonthlySummary",
+    "app/Models/TransactionModel.php:TransactionModel::getMonthlySummary"
+  ],
+  "suspected_files": [
+    "demo_app/app/Services/TransactionService.php",
+    "demo_app/app/Models/TransactionModel.php"
+  ],
+  "impact": [
+    "GET /transactions",
+    "monthly transaction summary",
+    "transaction report API contract"
+  ],
+  "safe_patch_scope": [
+    "demo_app/app/Services/TransactionService.php",
+    "demo_app/app/Models/TransactionModel.php"
+  ],
+  "confidence": 0.92,
+  "notes": "The first visible failure is a typo in TransactionService. The model is also in the safe impact scope because the route response contract depends on its summary shape. The self-correction loop can use test feedback to repair additional contract mismatches."
+}

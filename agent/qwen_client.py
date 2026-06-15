@@ -1,0 +1,214 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+from pathlib import Path
+from typing import Any
+
+from dotenv import load_dotenv
+
+
+class QwenClient:
+    """Qwen Cloud client for patch-plan generation.
+
+    Mock mode keeps the local demo deterministic. Real mode uses Alibaba Cloud
+    Model Studio / DashScope OpenAI-compatible API and asks Qwen to return the
+    same patch-plan JSON schema used by the safe patch engine.
+    """
+
+    def __init__(self, mock: bool = True, root_dir: Path | None = None) -> None:
+        load_dotenv()
+        self.mock = mock
+        self.root_dir = root_dir or Path.cwd()
+        self.api_key = (
+            os.getenv("QWEN_API_KEY")
+            or os.getenv("DASHSCOPE_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+            or ""
+        )
+        self.base_url = os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        self.model = os.getenv("QWEN_MODEL", "qwen-plus")
+        self.timeout = float(os.getenv("QWEN_TIMEOUT_SECONDS", "60"))
+
+    def generate_patch_plan(self, failure_log: str, context: dict[str, Any], retry_feedback: str | None = None) -> dict[str, Any]:
+        if self.mock:
+            return self._mock_patch_plan(context, retry_feedback)
+        return self._real_qwen_patch_plan(failure_log, context, retry_feedback)
+
+    def _real_qwen_patch_plan(self, failure_log: str, context: dict[str, Any], retry_feedback: str | None) -> dict[str, Any]:
+        if not self.api_key:
+            raise RuntimeError(
+                "Missing Qwen API key. Set QWEN_API_KEY or DASHSCOPE_API_KEY in .env. "
+                "Use --mock if you only want to run the local deterministic demo."
+            )
+
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError("Missing dependency: pip install openai") from exc
+
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=self.timeout)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are LynkMesh Autopilot Engineer, a safety-first autonomous code remediation agent. "
+                    "You generate a patch plan, not prose. Return only valid JSON. "
+                    "Do not use Markdown fences. Do not include explanations outside JSON. "
+                    "Only modify files listed in safe_patch_scope. "
+                    "Each edit must use exact find/replace strings from the provided file contents. "
+                    "Prefer the smallest safe patch. Never modify secrets, .env, vendor, deploy files, or unrelated files."
+                ),
+            },
+            {
+                "role": "user",
+                "content": self._build_prompt(failure_log, context, retry_feedback),
+            },
+        ]
+
+        response = client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content or ""
+        plan = self._parse_json_object(content)
+        return self._validate_real_plan(plan, retry_feedback)
+
+    def _build_prompt(self, failure_log: str, context: dict[str, Any], retry_feedback: str | None) -> str:
+        safe_files = context.get("safe_patch_scope") or context.get("suspected_files") or []
+        snippets = self._collect_file_snippets(safe_files)
+        feedback_section = retry_feedback or "No retry feedback yet. This is the first remediation attempt."
+
+        return f"""
+TASK
+Generate a safe patch plan JSON for the PHP demo app.
+
+IMPORTANT ATTEMPT RULES
+- If retry_feedback is empty or says this is the first remediation attempt, fix only the first visible failure from failure_log.
+- If retry_feedback contains a new failing assertion or response-contract mismatch, use it for self-correction.
+- Do not proactively fix hidden issues unless retry_feedback exposes them.
+
+REQUIRED JSON SCHEMA
+{{
+  "summary": "short patch summary",
+  "risk": "low|medium|high",
+  "reasoning": "brief reasoning",
+  "self_correction": false,
+  "edits": [
+    {{
+      "file": "demo_app/app/...php",
+      "find": "exact text that exists in file",
+      "replace": "exact replacement text",
+      "reason": "why this edit is needed"
+    }}
+  ],
+  "unified_diff_preview": "optional unified diff preview",
+  "uses_context_trace": []
+}}
+
+FAILURE LOG
+{failure_log}
+
+RETRY FEEDBACK
+{feedback_section}
+
+LYNKMESH DETERMINISTIC CONTEXT JSON
+{json.dumps(context, indent=2)}
+
+SAFE FILE CONTENTS
+{snippets}
+""".strip()
+
+    def _collect_file_snippets(self, files: list[str]) -> str:
+        parts: list[str] = []
+        for rel in files:
+            path = self.root_dir / rel
+            if not path.exists() or not path.is_file():
+                parts.append(f"--- {rel}\n<file not found>")
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if len(text) > 8000:
+                text = text[:8000] + "\n...<truncated>"
+            parts.append(f"--- {rel}\n{text}")
+        return "\n\n".join(parts)
+
+    def _parse_json_object(self, content: str) -> dict[str, Any]:
+        raw = content.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+            raw = re.sub(r"\s*```$", "", raw)
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+            if not match:
+                raise ValueError(f"Qwen response did not contain a JSON object: {content[:500]}")
+            parsed = json.loads(match.group(0))
+        if not isinstance(parsed, dict):
+            raise ValueError("Qwen response JSON must be an object.")
+        return parsed
+
+    def _validate_real_plan(self, plan: dict[str, Any], retry_feedback: str | None) -> dict[str, Any]:
+        plan.setdefault("summary", "Qwen-generated remediation patch")
+        plan.setdefault("risk", "low")
+        plan.setdefault("reasoning", "Generated by Qwen using LynkMesh deterministic context.")
+        plan.setdefault("unified_diff_preview", "")
+        plan.setdefault("retry_feedback_used", retry_feedback)
+        plan.setdefault("self_correction", bool(retry_feedback))
+        plan.setdefault("uses_context_trace", [])
+
+        edits = plan.get("edits")
+        if not isinstance(edits, list) or not edits:
+            raise ValueError("Qwen patch plan must contain a non-empty edits list.")
+
+        for idx, edit in enumerate(edits, start=1):
+            if not isinstance(edit, dict):
+                raise ValueError(f"Edit #{idx} must be an object.")
+            for key in ("file", "find", "replace"):
+                if key not in edit or not isinstance(edit[key], str) or edit[key] == "":
+                    raise ValueError(f"Edit #{idx} must contain non-empty string field: {key}")
+            edit.setdefault("reason", "Qwen-generated edit.")
+
+        return plan
+
+    def _mock_patch_plan(self, context: dict[str, Any], retry_feedback: str | None) -> dict[str, Any]:
+        feedback = (retry_feedback or "").lower()
+
+        if "total_amount" in feedback or "amount_total" in feedback or "undefined array key" in feedback:
+            return {
+                "summary": "Self-correct the transaction summary response shape after the first patch revealed a failing total_amount assertion.",
+                "risk": "low",
+                "reasoning": "The undefined method was fixed, but test verification revealed that the model returns amount_total while the route contract expects total_amount.",
+                "edits": [
+                    {
+                        "file": "demo_app/app/Models/TransactionModel.php",
+                        "find": "'amount_total' => 1250000,",
+                        "replace": "'total_amount' => 1250000,",
+                        "reason": "Align TransactionModel output with the tested API response contract."
+                    }
+                ],
+                "unified_diff_preview": "--- a/demo_app/app/Models/TransactionModel.php\n+++ b/demo_app/app/Models/TransactionModel.php\n@@\n-            'amount_total' => 1250000,\n+            'total_amount' => 1250000,\n",
+                "uses_context_trace": context.get("trace", []),
+                "retry_feedback_used": retry_feedback,
+                "self_correction": True,
+            }
+
+        return {
+            "summary": "Fix misspelled TransactionModel method call in TransactionService.",
+            "risk": "low",
+            "reasoning": "The initial failure is an undefined method. LynkMesh trace shows TransactionService calls the model, and the model defines getMonthlySummary().",
+            "edits": [
+                {
+                    "file": "demo_app/app/Services/TransactionService.php",
+                    "find": "getMontlySummary($month)",
+                    "replace": "getMonthlySummary($month)",
+                    "reason": "The model defines getMonthlySummary(), while the service calls getMontlySummary()."
+                }
+            ],
+            "unified_diff_preview": "--- a/demo_app/app/Services/TransactionService.php\n+++ b/demo_app/app/Services/TransactionService.php\n@@\n-        return $this->transactionModel->getMontlySummary($month);\n+        return $this->transactionModel->getMonthlySummary($month);\n",
+            "uses_context_trace": context.get("trace", []),
+            "retry_feedback_used": retry_feedback,
+            "self_correction": False,
+        }

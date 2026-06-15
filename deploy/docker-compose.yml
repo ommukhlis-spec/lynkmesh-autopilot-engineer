@@ -1,0 +1,7 @@
+services:
+  lynkmesh-autopilot-engineer:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8080:8080"
