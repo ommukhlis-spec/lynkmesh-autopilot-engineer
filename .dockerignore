@@ -1,0 +1,10 @@
+﻿.env
+.venv/
+.git/
+__pycache__/
+*.pyc
+*.zip
+runs/latest/*
+!runs/latest/.gitkeep
+docs/screenshots/*
+!docs/screenshots/.gitkeep
