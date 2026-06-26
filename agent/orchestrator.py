@@ -10,9 +10,22 @@ from .test_runner import TestRunner
 
 
 class AutopilotOrchestrator:
-    def __init__(self, config: AgentConfig, mock_qwen: bool = True) -> None:
+    def __init__(self, config: AgentConfig, mock_qwen: bool = True, mock_context: bool | None = None) -> None:
         self.config = config
-        self.lynkmesh = LynkMeshAdapter(config.context_json)
+        # mock_context defaults to mock_qwen so --mock stays a fully deterministic demo
+        # (mock Qwen + static context). Real mode (no --mock) uses real Qwen + real LynkMesh.
+        if mock_context is None:
+            mock_context = mock_qwen
+        self.lynkmesh = LynkMeshAdapter(
+            config.lynkmesh_repo_path,
+            mock=mock_context,
+            context_path=config.context_json,
+            root_dir=config.root_dir,
+            allowed_prefixes=config.allowed_prefixes,
+            timeout=config.lynkmesh_timeout,
+            profile=config.lynkmesh_profile,
+            fallback_to_static=config.lynkmesh_fallback_to_static,
+        )
         self.qwen = QwenClient(mock=mock_qwen, root_dir=config.root_dir)
         self.patch_engine = PatchEngine(config)
         self.test_runner = TestRunner(config.demo_app_dir)

@@ -191,7 +191,22 @@ LynkMesh provides deterministic codebase context, including:
 - safe patch scope;
 - impacted features.
 
-In this hackathon prototype, the LynkMesh context is represented as structured JSON so the execution layer can be tested end-to-end.
+The adapter invokes **LynkMesh Open directly**. In real mode (`python -m agent.main`, no
+`--mock`) it scans the configured repository (`demo_app/` by default; override with
+`--repo`) using `lynkmesh pack --profile expanded` + `lynkmesh report`, maps the failure onto
+the call graph, and emits a provenance-tagged context (`source=lynkmesh_real`). Install
+LynkMesh Open and ensure `php` is on PATH:
+
+```bash
+pip install -e ../lynkmesh-open
+```
+
+`--mock` keeps the deterministic demo using `runs/sample_lynkmesh_context.json` with
+unchanged output for video recording. `--mock-qwen` runs the real LynkMesh scan with
+deterministic (mock) Qwen — useful for verifying the real context path without API cost. If
+LynkMesh or PHP is unavailable in real mode, the adapter falls back to the static JSON,
+tagged `source=static_fallback`. See `docs/real_lynkmesh_integration_design.md` and
+`docs/lynkmesh_capabilities.md`.
 
 ## Limitations
 
@@ -206,7 +221,6 @@ In this hackathon prototype, the LynkMesh context is represented as structured J
 - GitHub PR creation.
 - GitHub Actions integration.
 - Laravel support.
-- Real LynkMesh graph service integration.
 - Better multi-file impact analysis.
 - Human approval UI.
 - Security scanning before patch submission.

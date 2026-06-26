@@ -2,3 +2,8 @@ flask>=3.0.0
 python-dotenv>=1.0.0
 openai>=1.40.0
 gunicorn>=22.0.0
+
+# LynkMesh Open — deterministic code-graph context provider for real mode.
+# Local sibling repo (not on PyPI). Install editable and ensure `php` is on PATH:
+#   pip install -e ../lynkmesh-open
+# Mock/demo mode (`python -m agent.main --mock`) does not require LynkMesh.
